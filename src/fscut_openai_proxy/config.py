@@ -43,15 +43,25 @@ def resolve_config_path() -> Path:
     return Path("config.toml")
 
 
+def default_state_path(config_path: Path) -> Path:
+    if config_path.exists() or config_path.parent != Path("."):
+        return config_path.with_name("token-state.json")
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        return Path(appdata) / "fscut-openai-proxy" / "token-state.json"
+    return Path("token-state.json")
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     path = resolve_config_path()
     if not path.exists():
-        return Settings()
+        settings = Settings()
+        settings.auth.state_path = str(default_state_path(path))
+        return settings
     with path.open("rb") as fh:
         payload = tomllib.load(fh)
     settings = Settings.model_validate(payload)
     if not settings.auth.state_path:
-        settings.auth.state_path = str(path.with_name("token-state.json"))
+        settings.auth.state_path = str(default_state_path(path))
     return settings
-

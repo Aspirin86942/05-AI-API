@@ -1,7 +1,17 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
+from fscut_openai_proxy.auth import AuthManager
 from fscut_openai_proxy.config import Settings, get_settings
-from fscut_openai_proxy.schemas import ChatCompletionRequest
+from fscut_openai_proxy.schemas import ChatCompletionRequest, OpenAIError
+from fscut_openai_proxy.token_store import FileBackedTokenStore, TokenState
+from fscut_openai_proxy.translator import (
+    build_nonstream_response,
+    build_upstream_payload,
+    collect_text_from_sse_lines,
+)
+from fscut_openai_proxy.upstream import UpstreamClient
 
 
 def require_local_api_key(
@@ -21,6 +31,19 @@ def require_local_api_key(
                 }
             },
         )
+
+
+def get_auth_manager(settings: Settings = Depends(get_settings)) -> AuthManager:
+    store = FileBackedTokenStore(
+        path=Path(settings.auth.state_path),
+        initial_state=TokenState(
+            access_token=settings.auth.access_token,
+            refresh_token=settings.auth.refresh_token,
+            connect_sid=settings.auth.connect_sid,
+            token_provider=settings.auth.token_provider,
+        ),
+    )
+    return AuthManager(token_store=store, refresh_margin_seconds=settings.auth.refresh_margin_seconds)
 
 
 router = APIRouter()
@@ -44,27 +67,15 @@ def list_models(settings: Settings = Depends(get_settings)) -> dict[str, object]
 def chat_completions(
     request: ChatCompletionRequest,
     settings: Settings = Depends(get_settings),
+    auth_manager: AuthManager = Depends(get_auth_manager),
 ) -> dict[str, object]:
-    if request.model != settings.upstream.model_alias:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "message": f"Unsupported model: {request.model}",
-                    "type": "invalid_request_error",
-                    "code": "unsupported_model",
-                    "retryable": False,
-                }
-            },
-        )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail={
-            "error": {
-                "message": "Chat completions adapter is not implemented yet",
-                "type": "server_error",
-                "code": "not_implemented",
-                "retryable": False,
-            }
-        },
-    )
+    try:
+        payload = build_upstream_payload(request)
+    except OpenAIError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    client = UpstreamClient(settings=settings, auth_manager=auth_manager)
+    response = client.post_chat(payload)
+    response.raise_for_status()
+    content, _ = collect_text_from_sse_lines(response.text.splitlines())
+    return build_nonstream_response(content=content, settings=settings)
