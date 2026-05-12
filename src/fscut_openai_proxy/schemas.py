@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -15,8 +15,8 @@ class ErrorEnvelope(BaseModel):
 
 
 class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant"]
-    content: str
+    role: str
+    content: str | list[dict[str, Any]]
 
 
 class ChatCompletionRequest(BaseModel):
@@ -28,6 +28,14 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = None
     stop: str | list[str] | None = None
     user: str | None = None
+    tools: object | None = None
+    tool_choice: object | None = None
+    functions: object | None = None
+    function_call: object | None = None
+    response_format: object | None = None
+    modalities: object | None = None
+    audio: object | None = None
+    n: int = 1
 
 
 class OpenAIError(Exception):

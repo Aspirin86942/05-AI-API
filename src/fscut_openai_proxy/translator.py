@@ -4,14 +4,34 @@ import uuid
 from collections.abc import Iterable, Iterator
 
 from fscut_openai_proxy.config import Settings
-from fscut_openai_proxy.schemas import ChatCompletionRequest, OpenAIError
+from fscut_openai_proxy.schemas import ChatCompletionRequest, ChatMessage, OpenAIError
+
+
+UNSUPPORTED_FIELDS = (
+    "tools",
+    "tool_choice",
+    "functions",
+    "function_call",
+    "response_format",
+    "modalities",
+    "audio",
+)
 
 
 def build_upstream_payload(request: ChatCompletionRequest) -> dict[str, object]:
     if request.model != "glm-4.7-flash":
         raise OpenAIError(status_code=400, code="unsupported_model", message="Only glm-4.7-flash is supported")
+    for field_name in UNSUPPORTED_FIELDS:
+        if getattr(request, field_name) is not None:
+            raise OpenAIError(
+                status_code=400,
+                code="unsupported_field",
+                message=f"{field_name} is not supported by this proxy",
+            )
+    if request.n != 1:
+        raise OpenAIError(status_code=400, code="unsupported_field", message="Only n=1 is supported")
     return {
-        "messages": [message.model_dump() for message in request.messages],
+        "messages": [_normalize_message(message) for message in request.messages],
         # 上游已确认返回 SSE；非流式响应由本地聚合，避免依赖未知的非流式上游契约。
         "stream": True,
         "temperature": request.temperature,
@@ -20,6 +40,24 @@ def build_upstream_payload(request: ChatCompletionRequest) -> dict[str, object]:
         "stop": request.stop,
         "user": request.user,
     }
+
+
+def _normalize_message(message: ChatMessage) -> dict[str, str]:
+    if message.role not in {"system", "user", "assistant"}:
+        raise OpenAIError(status_code=400, code="unsupported_role", message=f"Unsupported role: {message.role}")
+    if isinstance(message.content, str):
+        return {"role": message.role, "content": message.content}
+
+    text_parts: list[str] = []
+    for part in message.content:
+        if part.get("type") != "text" or not isinstance(part.get("text"), str):
+            raise OpenAIError(
+                status_code=400,
+                code="unsupported_content",
+                message="Only text content parts are supported",
+            )
+        text_parts.append(part["text"])
+    return {"role": message.role, "content": "".join(text_parts)}
 
 
 def collect_text_from_sse_lines(lines: Iterable[str]) -> tuple[str, str]:
