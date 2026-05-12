@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from fscut_openai_proxy.errors import UpstreamAuthExpiredError
+from fscut_openai_proxy.errors import UpstreamAuthExpiredError, UpstreamRefreshInvalidResponseError
 from fscut_openai_proxy.token_store import FileBackedTokenStore, TokenState
 
 
@@ -81,15 +81,50 @@ class RefreshClient:
         if response.status_code >= 400:
             raise UpstreamAuthExpiredError()
         data = response.json()
+        access_token = self._extract_access_token(data)
+        refresh_token = self._extract_refresh_token(data) or state.refresh_token
+        if not access_token:
+            raise UpstreamRefreshInvalidResponseError()
         set_cookie = response.headers.get("set-cookie", "")
         match = re.search(r"connect\.sid=([^;]+)", set_cookie)
         connect_sid = match.group(1) if match else state.connect_sid
         self._token_store.save(
             TokenState(
-                access_token=data["accessToken"],
-                refresh_token=data.get("refreshToken", state.refresh_token),
+                access_token=access_token,
+                refresh_token=refresh_token,
                 connect_sid=connect_sid,
                 token_provider=state.token_provider,
             )
         )
+
+    def _extract_access_token(self, data: Any) -> str | None:
+        if not isinstance(data, dict):
+            return None
+        token = data.get("accessToken") or data.get("token")
+        if isinstance(token, str) and token:
+            return token
+        nested_token = data.get("data")
+        if isinstance(nested_token, dict):
+            access_token = nested_token.get("accessToken") or nested_token.get("token")
+            if isinstance(access_token, str) and access_token:
+                return access_token
+        return None
+
+    def _extract_refresh_token(self, data: Any) -> str | None:
+        if not isinstance(data, dict):
+            return None
+        refresh_token = data.get("refreshToken")
+        if isinstance(refresh_token, str) and refresh_token:
+            return refresh_token
+        nested_token = data.get("data")
+        if isinstance(nested_token, dict):
+            nested_refresh_token = nested_token.get("refreshToken")
+            if isinstance(nested_refresh_token, str) and nested_refresh_token:
+                return nested_refresh_token
+        user = data.get("user")
+        if isinstance(user, dict):
+            user_refresh_token = user.get("refreshToken")
+            if isinstance(user_refresh_token, str) and user_refresh_token:
+                return user_refresh_token
+        return None
 

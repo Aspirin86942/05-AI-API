@@ -2,7 +2,7 @@ import httpx
 
 from fscut_openai_proxy.auth import AuthManager, RefreshClient
 from fscut_openai_proxy.config import Settings
-from fscut_openai_proxy.errors import UpstreamAuthExpiredError, UpstreamRateLimitError
+from fscut_openai_proxy.errors import UpstreamAuthExpiredError, UpstreamForbiddenError, UpstreamRateLimitError
 
 
 class UpstreamClient:
@@ -45,6 +45,8 @@ class UpstreamClient:
             response = self._do_post(payload)
         if response.status_code == 401:
             raise UpstreamAuthExpiredError()
+        if response.status_code == 403:
+            raise UpstreamForbiddenError()
         if response.status_code == 429:
             raise UpstreamRateLimitError()
         response.raise_for_status()

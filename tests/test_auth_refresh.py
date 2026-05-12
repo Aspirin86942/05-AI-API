@@ -63,6 +63,39 @@ def test_refresh_client_updates_tokens(tmp_path: Path) -> None:
 
 
 @respx.mock
+def test_refresh_client_accepts_real_nested_token_response(tmp_path: Path) -> None:
+    respx.post("https://chat.fscut.com/api/auth/refresh").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "token": "new-access",
+                "user": {
+                    "refreshToken": [],
+                    "provider": "openid",
+                },
+            },
+            headers={"set-cookie": "connect.sid=new-session; Path=/; HttpOnly"},
+        )
+    )
+    store = FileBackedTokenStore(
+        path=tmp_path / "token-state.json",
+        initial_state=TokenState(
+            access_token="old-access",
+            refresh_token="old-refresh",
+            connect_sid="old-session",
+            token_provider="openid",
+        ),
+    )
+
+    client = RefreshClient(base_url="https://chat.fscut.com", token_store=store)
+    client.refresh()
+
+    assert store.load().access_token == "new-access"
+    assert store.load().refresh_token == "old-refresh"
+    assert store.load().connect_sid == "new-session"
+
+
+@respx.mock
 def test_chat_retries_once_after_refresh() -> None:
     chat_url = "https://chat.fscut.com/api/agents/chat/%E5%86%85%E9%83%A8%E6%A8%A1%E5%9E%8B-vllm-GLM4.7-flash"
     refresh_url = "https://chat.fscut.com/api/auth/refresh"
@@ -136,3 +169,44 @@ state_path = "{(tmp_path / 'token-state.json').as_posix()}"
 
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "upstream_auth_expired"
+
+
+@respx.mock
+def test_chat_returns_upstream_auth_error_when_refresh_200_has_no_token(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    expired_access_token = _unsigned_jwt_with_exp(int(time.time()) - 60)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""
+[server]
+local_api_key = "local-test-key"
+
+[auth]
+access_token = "{expired_access_token}"
+refresh_token = "expired-refresh"
+connect_sid = "expired-session"
+token_provider = "openid"
+state_path = "{(tmp_path / 'token-state.json').as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FSCUT_PROXY_CONFIG", str(config_path))
+    get_settings.cache_clear()
+    respx.post("https://chat.fscut.com/api/auth/refresh").mock(
+        return_value=httpx.Response(200, json={"message": "login required"})
+    )
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer local-test-key"},
+        json={
+            "model": "glm-4.7-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "upstream_refresh_invalid_response"
