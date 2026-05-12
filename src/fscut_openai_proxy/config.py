@@ -37,19 +37,11 @@ def resolve_config_path() -> Path:
     env_path = os.getenv("FSCUT_PROXY_CONFIG")
     if env_path:
         return Path(env_path)
-    appdata = os.getenv("APPDATA")
-    if appdata:
-        return Path(appdata) / "fscut-openai-proxy" / "config.toml"
     return Path("config.toml")
 
 
 def default_state_path(config_path: Path) -> Path:
-    if config_path.exists() or config_path.parent != Path("."):
-        return config_path.with_name("token-state.json")
-    appdata = os.getenv("APPDATA")
-    if appdata:
-        return Path(appdata) / "fscut-openai-proxy" / "token-state.json"
-    return Path("token-state.json")
+    return config_path.with_name("token-state.json")
 
 
 @lru_cache(maxsize=1)

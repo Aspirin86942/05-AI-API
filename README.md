@@ -26,7 +26,9 @@ conda run -n test python -m fscut_openai_proxy
 
 ## 配置
 
-默认读取 `%APPDATA%\fscut-openai-proxy\config.toml`，也可以通过 `FSCUT_PROXY_CONFIG` 指定配置文件路径。
+默认读取项目当前工作目录下的 `config.toml`，也可以通过 `FSCUT_PROXY_CONFIG` 指定配置文件路径。
+
+刷新后的 token 默认写到配置文件同目录的 `token-state.json`。例如长期部署在 Linux 服务器时，可以把 `config.toml` 放在项目目录，程序会把刷新后的 token 写到同目录 `token-state.json`。
 
 ```toml
 [server]
