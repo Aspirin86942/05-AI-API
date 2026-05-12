@@ -1,7 +1,7 @@
 import json
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 from fscut_openai_proxy.config import Settings
 from fscut_openai_proxy.schemas import ChatCompletionRequest, OpenAIError
@@ -56,3 +56,64 @@ def build_nonstream_response(content: str, settings: Settings) -> dict[str, obje
         ],
     }
 
+
+def to_openai_sse_chunks(lines: Iterable[str], model_alias: str) -> Iterator[str]:
+    request_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created = int(time.time())
+    yield (
+        "data: "
+        + json.dumps(
+            {
+                "id": request_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_alias,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        + "\n\n"
+    )
+    for line in lines:
+        if not line.startswith("data: "):
+            continue
+        payload = line[6:]
+        if payload == "[DONE]":
+            break
+        data = json.loads(payload)
+        delta = data.get("delta")
+        if isinstance(delta, str) and delta:
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_alias,
+                        "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\n\n"
+            )
+        if data.get("done") is True:
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "id": request_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_alias,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\n\n"
+            )
+            break
+    yield "data: [DONE]\n\n"

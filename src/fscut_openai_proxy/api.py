@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from fscut_openai_proxy.auth import AuthManager
 from fscut_openai_proxy.config import Settings, get_settings
@@ -10,6 +11,7 @@ from fscut_openai_proxy.translator import (
     build_nonstream_response,
     build_upstream_payload,
     collect_text_from_sse_lines,
+    to_openai_sse_chunks,
 )
 from fscut_openai_proxy.upstream import UpstreamClient
 
@@ -68,7 +70,7 @@ def chat_completions(
     request: ChatCompletionRequest,
     settings: Settings = Depends(get_settings),
     auth_manager: AuthManager = Depends(get_auth_manager),
-) -> dict[str, object]:
+):
     try:
         payload = build_upstream_payload(request)
     except OpenAIError as exc:
@@ -77,5 +79,11 @@ def chat_completions(
     client = UpstreamClient(settings=settings, auth_manager=auth_manager)
     response = client.post_chat(payload)
     response.raise_for_status()
-    content, _ = collect_text_from_sse_lines(response.text.splitlines())
+    lines = response.text.splitlines()
+    if request.stream:
+        return StreamingResponse(
+            to_openai_sse_chunks(lines=lines, model_alias=settings.upstream.model_alias),
+            media_type="text/event-stream",
+        )
+    content, _ = collect_text_from_sse_lines(lines)
     return build_nonstream_response(content=content, settings=settings)
