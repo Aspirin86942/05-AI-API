@@ -3,4 +3,14 @@ worktrees/
 .tmp_fscut/
 __pycache__/
 .pytest_cache/
+.venv/
+dist/
+build/
+*.egg-info/
 *.pyc
+*.pyo
+*.pyd
+*.log
+tests/fixtures/upstream/*real*.json
+tests/fixtures/upstream/*real*.txt
+tests/fixtures/upstream/*real*.md
