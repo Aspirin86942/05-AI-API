@@ -1,3 +1,5 @@
+import base64
+import json
 import time
 from pathlib import Path
 
@@ -7,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from fscut_openai_proxy.app import create_app
 from fscut_openai_proxy.auth import RefreshClient, token_expires_soon
+from fscut_openai_proxy.config import get_settings
 from fscut_openai_proxy.token_store import FileBackedTokenStore, TokenState
 
 
@@ -20,6 +23,12 @@ def test_token_expires_soon_when_exp_is_far_enough() -> None:
     exp = int(time.time()) + 600
 
     assert token_expires_soon(exp=exp, refresh_margin_seconds=60) is False
+
+
+def _unsigned_jwt_with_exp(exp: int) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none"}).encode("utf-8")).decode("ascii").rstrip("=")
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode("utf-8")).decode("ascii").rstrip("=")
+    return f"{header}.{payload}."
 
 
 @respx.mock
@@ -86,3 +95,44 @@ def test_chat_retries_once_after_refresh() -> None:
     assert response.json()["choices"][0]["message"]["content"] == "好"
     assert chat_route.call_count == 2
     assert refresh_route.called is True
+
+
+@respx.mock
+def test_chat_returns_upstream_auth_error_when_refresh_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    expired_access_token = _unsigned_jwt_with_exp(int(time.time()) - 60)
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""
+[server]
+local_api_key = "local-test-key"
+
+[auth]
+access_token = "{expired_access_token}"
+refresh_token = "expired-refresh"
+connect_sid = "expired-session"
+token_provider = "openid"
+state_path = "{(tmp_path / 'token-state.json').as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FSCUT_PROXY_CONFIG", str(config_path))
+    get_settings.cache_clear()
+    respx.post("https://chat.fscut.com/api/auth/refresh").mock(
+        return_value=httpx.Response(401, json={"message": "refresh expired"})
+    )
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": "Bearer local-test-key"},
+        json={
+            "model": "glm-4.7-flash",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "upstream_auth_expired"

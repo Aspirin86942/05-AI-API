@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from fscut_openai_proxy.errors import UpstreamAuthExpiredError
 from fscut_openai_proxy.token_store import FileBackedTokenStore, TokenState
 
 
@@ -77,7 +78,8 @@ class RefreshClient:
             },
             timeout=15.0,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise UpstreamAuthExpiredError()
         data = response.json()
         set_cookie = response.headers.get("set-cookie", "")
         match = re.search(r"connect\.sid=([^;]+)", set_cookie)
