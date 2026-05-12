@@ -17,6 +17,23 @@
    - 保存 refresh 成功响应 JSON
    - token 值必须打码
 
+## 已确认的聊天请求头契约
+
+2026-05-12 已从 Chrome DevTools 确认聊天请求至少需要以下认证材料：
+
+```text
+Authorization: Bearer [REDACTED_ACCESS_TOKEN]
+Cookie: connect.sid=[REDACTED_SESSION]; token_provider=openid; refreshToken=[REDACTED_REFRESH_TOKEN]
+```
+
+同时已确认响应会返回限流头：
+
+- `x-ratelimit-limit`
+- `x-ratelimit-remaining`
+- `x-ratelimit-reset`
+
+详见 `chat_request_headers_redacted.md`。该文件只保存打码后的字段结构，禁止保存原始 token、cookie、邮箱、手机号或用户身份字段。
+
 ## 聊天请求体采集步骤
 
 1. 打开 Chrome DevTools -> Network。

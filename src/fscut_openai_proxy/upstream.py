@@ -17,13 +17,24 @@ class UpstreamClient:
         except RuntimeError:
             self._refresh_client.refresh()
             token = self._auth_manager.token_store.load().access_token
+        state = self._auth_manager.token_store.load()
         endpoint = httpx.URL(
             f"{self._settings.upstream.base_url}/api/agents/chat/{self._settings.upstream.agent_endpoint}"
         )
         return httpx.post(
             str(endpoint),
             json=payload,
-            headers={"Authorization": f"Bearer {token}", "Accept": "*/*"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "*/*",
+                "Origin": self._settings.upstream.base_url,
+                "Referer": f"{self._settings.upstream.base_url}/c/new",
+            },
+            cookies={
+                "connect.sid": state.connect_sid,
+                "token_provider": state.token_provider,
+                "refreshToken": state.refresh_token,
+            },
             timeout=300.0,
         )
 

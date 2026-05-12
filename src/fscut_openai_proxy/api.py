@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from fscut_openai_proxy.auth import AuthManager
 from fscut_openai_proxy.config import Settings, get_settings
@@ -49,6 +49,7 @@ def get_auth_manager(settings: Settings = Depends(get_settings)) -> AuthManager:
 
 
 router = APIRouter()
+RATE_LIMIT_HEADERS = ("x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset")
 
 
 @router.get("/v1/models", dependencies=[Depends(require_local_api_key)])
@@ -80,10 +81,19 @@ def chat_completions(
     response = client.post_chat(payload)
     response.raise_for_status()
     lines = response.text.splitlines()
+    rate_limit_headers = {
+        header_name: response.headers[header_name]
+        for header_name in RATE_LIMIT_HEADERS
+        if header_name in response.headers
+    }
     if request.stream:
         return StreamingResponse(
             to_openai_sse_chunks(lines=lines, model_alias=settings.upstream.model_alias),
             media_type="text/event-stream",
+            headers=rate_limit_headers,
         )
     content, _ = collect_text_from_sse_lines(lines)
-    return build_nonstream_response(content=content, settings=settings)
+    return JSONResponse(
+        content=build_nonstream_response(content=content, settings=settings),
+        headers=rate_limit_headers,
+    )
