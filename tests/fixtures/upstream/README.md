@@ -34,6 +34,20 @@ Cookie: connect.sid=[REDACTED_SESSION]; token_provider=openid; refreshToken=[RED
 
 详见 `chat_request_headers_redacted.md`。该文件只保存打码后的字段结构，禁止保存原始 token、cookie、邮箱、手机号或用户身份字段。
 
+## 已确认的会话消息读取接口
+
+2026-05-12 已从 Chrome DevTools 确认存在会话消息读取接口：
+
+```text
+GET /api/messages/{conversation_id}
+Authorization: Bearer [REDACTED_ACCESS_TOKEN]
+Cookie: connect.sid=[REDACTED_SESSION]; token_provider=openid; refreshToken=[REDACTED_REFRESH_TOKEN]
+```
+
+响应为 `application/json; charset=utf-8`，并支持 `ETag` / `If-None-Match` 缓存校验。
+
+详见 `message_history_headers_redacted.md`。该接口对第一版 OpenAI chat 代理不是必需项，但对后续支持上游会话恢复、历史读取或 `conversation_id` 映射有帮助。
+
 ## 聊天请求体采集步骤
 
 1. 打开 Chrome DevTools -> Network。
