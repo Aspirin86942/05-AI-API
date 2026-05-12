@@ -11,6 +11,11 @@ build/
 *.pyo
 *.pyd
 *.log
+config.toml
+token-state.json
+token-state.tmp
+.env
+.env.local
 tests/fixtures/upstream/*real*.json
 tests/fixtures/upstream/*real*.txt
 tests/fixtures/upstream/*real*.md
